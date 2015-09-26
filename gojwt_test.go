@@ -3,7 +3,7 @@ package gojwt_test
 import (
 	"testing"
 
-	"github.com/spid37/jwt-go-wrapper"
+	"github.com/spid37/go-jwt"
 )
 
 var token string
