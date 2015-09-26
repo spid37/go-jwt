@@ -2,6 +2,7 @@ package gojwt
 
 import (
 	"crypto/rsa"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -13,6 +14,9 @@ import (
 
 // Options is a struct for specifying configuration options for the middleware.
 type Options struct {
+	// set true if only public key required.
+	PublicKeyOnly bool
+	// paths to keys
 	PrivateKeyPath string
 	PublicKeyPath  string
 	// Time in minutes untill the token will expire
@@ -35,7 +39,7 @@ func (k *Keys) loadPrivateKey(privateKeyPath string) error {
 	var err error
 
 	if privateKeyPath == "" {
-		err = fmt.Errorf("Private keys are required")
+		err = errors.New("Private key is required")
 		return err
 	}
 
@@ -60,7 +64,7 @@ func (k *Keys) loadPublicKey(publicKeyPath string) error {
 	var err error
 
 	if publicKeyPath == "" {
-		err = fmt.Errorf("Public key is required")
+		err = errors.New("Public key is required")
 		return err
 	}
 
@@ -98,7 +102,13 @@ func New(options ...Options) *GoJWT {
 		opts = options[0]
 	}
 
+	if opts.PublicKeyOnly {
+	}
+
 	err = keys.loadPrivateKey(opts.PrivateKeyPath)
+	if !opts.PublicKeyOnly && err != nil {
+		log.Fatal(err)
+	}
 	err = keys.loadPublicKey(opts.PublicKeyPath)
 	if err != nil {
 		log.Fatal(err)
@@ -122,6 +132,9 @@ func (m *GoJWT) logf(format string, args ...interface{}) {
 
 // GenerateToken - generate a new token
 func (m *GoJWT) GenerateToken(claims map[string]string) (string, error) {
+	if m.SignKey == nil {
+		return "", errors.New("Private key not set")
+	}
 	// Create the token
 	token := jwt.New(jwt.SigningMethodRS256)
 	// Set some claims
@@ -129,13 +142,12 @@ func (m *GoJWT) GenerateToken(claims map[string]string) (string, error) {
 		token.Claims[c] = v
 	}
 
-	// expire time
-	token.Claims["exp"] = time.Now().Add(time.Minute * time.Duration(m.Options.ExpireMins)).Unix()
-	// original creation time
-	token.Claims["iat_orginal"] = time.Now().Unix()
+	// convert Expire mins to nano seconds and add to Now
+	// to create expiry time
+	expireTime := time.Minute * time.Duration(m.Options.ExpireMins)
+	token.Claims["exp"] = time.Now().Add(expireTime).Unix()
 	// this token creation time.
 	token.Claims["iat"] = time.Now().Unix()
-	token.Claims["count"] = 1
 	// Sign and get the complete encoded token as a string
 	tokenString, err := token.SignedString(m.SignKey)
 	return tokenString, err
@@ -148,7 +160,7 @@ func (m *GoJWT) DecodeToken(token string) (*jwt.Token, error) {
 	if token == "" {
 		// If we get here, the required token is missing
 		errorMsg := "Required authorization token not found"
-		return nil, fmt.Errorf(errorMsg)
+		return nil, errors.New(errorMsg)
 	}
 
 	// Now parse the token
@@ -166,8 +178,7 @@ func (m *GoJWT) DecodeToken(token string) (*jwt.Token, error) {
 
 	// Check if there was an error in parsing...
 	if err != nil {
-		m.logf("Error parsing token: %v", err)
-		return parsedToken, fmt.Errorf("Error parsing token: %v", err)
+		return parsedToken, err
 	}
 	return parsedToken, err
 }
@@ -179,14 +190,12 @@ func (m *GoJWT) Verify(token string) (map[string]interface{}, error) {
 	parsedToken, err := m.DecodeToken(token)
 
 	if err != nil {
-		m.logf("Error parsing token: %v", err)
 		return nil, err
 	}
 
 	// Check if the parsed token is valid...
 	if !parsedToken.Valid {
-		m.logf("Token is invalid")
-		return nil, fmt.Errorf("Token is invalid")
+		return nil, errors.New("Token is invalid")
 	}
 
 	return parsedToken.Claims, err
